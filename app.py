@@ -331,6 +331,154 @@ async def api_me(request: Request):
 async def healthz():
     return {"ok": True, "service": "skimaudit", "version": "1.0.0"}
 
+# ---------------------------------------------------------------- self-operating URL audit
+# The user gives a website; SkimAudit goes there itself, downloads the page,
+# extracts every script (external files + inline blocks), scans each one and
+# returns one combined audit. SSRF-guarded: public http(s) only, resolved IPs
+# must not be private/loopback/link-local/reserved, redirects re-validated,
+# hard caps on page size, script size, script count and time.
+import socket, ipaddress, urllib.request, urllib.error, urllib.parse
+from html.parser import HTMLParser
+
+MAX_PAGE = 2 * 1024 * 1024
+MAX_SCRIPTS = 25
+FETCH_TIMEOUT = 12
+UA = {"User-Agent": "SkimAudit/1.0 (+security-audit; static fetch only, scripts are never executed)"}
+
+# Explicit blocklist — deliberately NOT ipaddress.is_private, which also flags
+# the 198.18/15 benchmarking range some resolvers legitimately map hosts into.
+_BLOCKED_NETS = [ipaddress.ip_network(n) for n in (
+    "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
+    "172.16.0.0/12", "192.168.0.0/16", "224.0.0.0/4", "240.0.0.0/4",
+    "::1/128", "fe80::/10", "fc00::/7", "::/128")]
+_BLOCKED_HOSTS = {"localhost", "metadata.google.internal", "metadata"}
+
+def validate_public_url(url: str) -> str:
+    p = urllib.parse.urlparse(url or "")
+    if p.scheme not in ("http", "https") or not p.hostname:
+        raise HTTPException(400, "Enter a full website address starting with http:// or https://")
+    host = p.hostname.lower()
+    if host in _BLOCKED_HOSTS or host.endswith(".local") or host.endswith(".internal"):
+        raise HTTPException(400, "That host is an internal address — blocked for safety.")
+    try:
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except Exception:
+        raise HTTPException(400, f"Could not resolve host: {host}")
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if any(ip in net for net in _BLOCKED_NETS):
+            raise HTTPException(400, "That address points at a private/internal network — blocked for safety.")
+    return url
+
+def fetch_text(url: str, max_bytes: int) -> str:
+    """Fetch with requests (robust chunked/gzip handling). Redirects are
+    followed manually (max 3) and every hop is SSRF-re-validated."""
+    import requests
+    current = url
+    for _ in range(4):
+        validate_public_url(current)
+        try:
+            with requests.get(current, headers=UA, timeout=FETCH_TIMEOUT,
+                              stream=True, allow_redirects=False) as resp:
+                if resp.status_code in (301, 302, 303, 307, 308):
+                    loc = resp.headers.get("Location")
+                    if not loc:
+                        raise HTTPException(400, f"Redirect without a destination from {current}")
+                    current = urllib.parse.urljoin(current, loc)
+                    continue
+                if resp.status_code >= 400:
+                    raise HTTPException(400, f"The site answered with HTTP {resp.status_code} for {current}")
+                chunks, total = [], 0
+                for chunk in resp.iter_content(chunk_size=65536):
+                    if not chunk:
+                        continue
+                    chunks.append(chunk); total += len(chunk)
+                    if total > max_bytes:
+                        break
+                data = b"".join(chunks)[:max_bytes]
+                return data.decode("utf-8", errors="replace")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(400, f"Could not fetch {current}: {type(e).__name__}")
+    raise HTTPException(400, "Too many redirects.")
+
+class _ScriptExtractor(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.srcs = []
+        self.inline = []
+        self._cur = None
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() == "script":
+            d = dict(attrs)
+            if d.get("src"):
+                self.srcs.append(d["src"])
+            else:
+                self._cur = []
+    def handle_data(self, data):
+        if self._cur is not None:
+            self._cur.append(data)
+    def handle_endtag(self, tag):
+        if tag.lower() == "script" and self._cur is not None:
+            body = "".join(self._cur).strip()
+            if body:
+                self.inline.append(body)
+            self._cur = None
+
+class UrlIn(BaseModel):
+    url: str
+
+@app.post("/api/scan-url")
+async def api_scan_url(body: UrlIn, request: Request):
+    if not rate_ok(request.client.host if request.client else "x"):
+        raise HTTPException(429, "Rate limit reached — try again in a few minutes.")
+    url = (body.url or "").strip()
+    if url and not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    validate_public_url(url)
+    html_text = fetch_text(url, MAX_PAGE)
+    ex = _ScriptExtractor()
+    try:
+        ex.feed(html_text)
+    except Exception:
+        pass
+    jobs = []  # (label, code)
+    seen = set()
+    for src in ex.srcs:
+        full = urllib.parse.urljoin(url, src)
+        if full in seen:
+            continue
+        seen.add(full)
+        if len(jobs) >= MAX_SCRIPTS:
+            break
+        try:
+            code = fetch_text(full, MAX_UPLOAD)
+            jobs.append((full[:160], code))
+        except HTTPException as e:
+            jobs.append((full[:160], None))
+    for i, body_code in enumerate(ex.inline[:MAX_SCRIPTS], start=1):
+        jobs.append((f"{url} — inline script #{i}", body_code[:MAX_UPLOAD]))
+
+    results = []
+    agg = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    worst = 0
+    for label, code in jobs:
+        if code is None:
+            results.append({"filename": label, "error": "Could not download this script file."})
+            continue
+        saved = _save_scan(code, label, request)
+        for k in agg:
+            agg[k] += saved["counts"].get(k, 0)
+        worst = max(worst, saved["risk_score"])
+        results.append({"scan_id": saved["scan_id"], "filename": label, "verdict": saved["verdict"],
+                        "risk_score": saved["risk_score"], "counts": saved["counts"]})
+    if not results:
+        raise HTTPException(404, "No scripts found on that page (or none could be downloaded).")
+    return {"url": url, "scripts_found": len(jobs), "scripts": results,
+            "totals": agg, "worst_risk": worst,
+            "note": "Scripts were downloaded and read statically — nothing was executed."}
+
 # ---------------------------------------------------------------- samples
 @app.get("/api/samples/{name}")
 async def api_sample(name: str):
