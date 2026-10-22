@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SkimAudit — Payment Security Auditor & Skimmer Detector</title>
+<style>
+:root{--bg:#070d1a;--panel:#0d1626;--panel2:#111e33;--line:#1e3355;--txt:#e2e8f0;--mut:#8ca3c3;--acc:#38bdf8;--crit:#ef4444;--high:#f97316;--med:#eab308;--low:#22c55e}
+*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--txt)}
+header{display:flex;align-items:center;gap:12px;padding:14px 18px;background:linear-gradient(90deg,#0b1a30,#0d2547);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;flex-wrap:wrap}
+.logo{font-size:22px;font-weight:800}.logo span{color:var(--acc)} .tag{color:var(--mut);font-size:13px}
+button{background:var(--acc);color:#04121f;border:0;padding:9px 16px;border-radius:9px;font-weight:700;cursor:pointer}
+button.ghost{background:transparent;color:var(--txt);border:1px solid var(--line)} button.danger{background:var(--crit);color:#fff}
+input,select,textarea{background:#0a1424;color:var(--txt);border:1px solid var(--line);border-radius:9px;padding:9px}
+main{max-width:1180px;margin:0 auto;padding:18px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:14px 0}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}.stat b{font-size:30px;display:block}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.tab{padding:9px 14px;border-radius:999px;border:1px solid var(--line);background:var(--panel);cursor:pointer}.tab.on{background:var(--acc);color:#04121f;font-weight:800}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;margin:12px 0}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:820px){.grid{grid-template-columns:1fr}}
+.editorwrap{display:flex;background:#050b16;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.ln{padding:12px 8px;text-align:right;color:#475569;font-family:ui-monospace,monospace;font-size:13px;line-height:1.5;user-select:none;white-space:pre;overflow:hidden}
+textarea.code{flex:1;border:0;border-radius:0;font-family:ui-monospace,monospace;font-size:13px;line-height:1.5;min-height:320px;resize:vertical;background:transparent}
+.badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:800;text-transform:uppercase}
+.critical{background:var(--crit);color:#fff}.high{background:var(--high);color:#fff}.medium{background:var(--med);color:#111}.low{background:var(--low);color:#06280f}.info{background:#64748b;color:#fff}
+.finding{border:1px solid var(--line);border-left:6px solid var(--mut);border-radius:12px;padding:14px;margin:10px 0;background:var(--panel2)}
+.finding.critical{border-left-color:var(--crit)}.finding.high{border-left-color:var(--high)}.finding.medium{border-left-color:var(--med)}.finding.low{border-left-color:var(--low)}
+code.snip{display:block;background:#050b16;padding:10px;border-radius:8px;overflow-x:auto;font-size:12px;margin:8px 0;white-space:pre-wrap;word-break:break-all}
+.src{background:#050b16;border-radius:12px;padding:12px;overflow:auto;max-height:480px;font-family:ui-monospace,monospace;font-size:12.5px;line-height:1.55}
+.src div{white-space:pre}.src .hl{background:rgba(239,68,68,.22)}.src .no{color:#475569;display:inline-block;width:38px;text-align:right;margin-right:10px;user-select:none}
+.meter{height:14px;background:#1e293b;border-radius:99px;overflow:hidden}.meter i{display:block;height:100%;background:linear-gradient(90deg,#22c55e,#eab308,#f97316,#ef4444)}
+table{width:100%;border-collapse:collapse}td,th{padding:9px;border-bottom:1px solid var(--line);text-align:left;font-size:14px}
+.mut{color:var(--mut)} .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+iframe{width:100%;height:420px;border:1px solid var(--line);border-radius:12px;background:#0b1220}
+pre.codebox{background:#050b16;padding:14px;border-radius:12px;overflow:auto;font-size:12.5px;white-space:pre-wrap}
+.check li{margin:7px 0}
+.empty{padding:26px;text-align:center;color:var(--mut)}
+a{color:var(--acc)}
+</style></head>
+<body>
+<header>
+  <div class="logo">🛡️ Skim<span>Audit</span></div>
+  <div class="tag">Payment Security Auditor &amp; Skimmer Detector — static analysis only. Submitted code is <b>never executed on the server</b> and reports redact card-like numbers.</div>
+  <div style="margin-left:auto" class="row"><span id="me" class="mut"></span>
+  <button class="ghost" id="loginBtn">Owner login</button></div>
+</header>
+<main>
+  <div class="stats">
+    <div class="stat"><span class="mut">Files analyzed</span><b id="stTotal">0</b></div>
+    <div class="stat"><span class="mut">🔴 Critical</span><b id="stCrit" style="color:var(--crit)">0</b></div>
+    <div class="stat"><span class="mut">🟠 High</span><b id="stHigh" style="color:var(--high)">0</b></div>
+    <div class="stat"><span class="mut">🟡 Medium</span><b id="stMed" style="color:var(--med)">0</b></div>
+    <div class="stat"><span class="mut">🟢 Low</span><b id="stLow" style="color:var(--low)">0</b></div>
+    <div class="stat"><span class="mut">Retention</span><b style="font-size:18px;padding-top:8px">30 days</b><span class="mut">then auto-purged</span></div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab on" data-tab="scan">🔍 Scanner</div>
+    <div class="tab" data-tab="history">🗂️ Scan history</div>
+    <div class="tab" data-tab="remed">🧰 Remediation assistant</div>
+    <div class="tab" data-tab="sandbox">🧪 Safe sandbox</div>
+  </div>
+
+  <!-- SCANNER -->
+  <section id="tab-scan">
+    <div class="panel">
+      <div class="row">
+        <input id="fname" value="pasted-code.js" style="min-width:220px" aria-label="Filename">
+        <input type="file" id="fileUp" accept=".js,.mjs,.txt">
+        <button class="ghost" id="loadSkim">Load suspicious sample</button>
+        <button class="ghost" id="loadSafe">Load safe sample</button>
+        <button id="scanBtn">▶ Run security scan</button>
+      </div>
+      <p class="mut" style="margin:10px 0">Paste JavaScript or upload a .js file (max 512 KB). The analyzer separates <b>confirmed behavior</b> from <b>suspicious indicators</b> — commented-out sends are flagged as indicators, never claimed as live transmissions.</p>
+      <div class="editorwrap"><div class="ln" id="ln">1</div><textarea class="code" id="code" spellcheck="false" placeholder="// Paste JavaScript here…"></textarea></div>
+      <div id="scanMsg" class="mut" style="margin-top:8px"></div>
+    </div>
+    <div id="results"></div>
+  </section>
+
+  <!-- HISTORY -->
+  <section id="tab-history" hidden>
+    <div class="panel">
+      <div class="row"><input id="q" placeholder="Search filename…" style="flex:1;min-width:180px">
+      <select id="sevFilter"><option value="">All severities</option><option>critical</option><option>high</option><option>medium</option><option>low</option></select>
+      <button class="ghost" id="refreshHist">Refresh</button></div>
+      <div id="histWrap" style="margin-top:12px"></div>
+    </div>
+  </section>
+
+  <!-- REMEDIATION -->
+  <section id="tab-remed" hidden>
+    <div class="panel"><h2 style="margin-top:0">Safe replacement — scoped debugger (collects no payment data)</h2>
+      <pre class="codebox" id="safeCode">Run a scan to load the remediation pack.</pre></div>
+    <div class="panel"><h2 style="margin-top:0">Recommended Content Security Policy</h2><pre class="codebox" id="cspBox">—</pre>
+      <p class="mut">Hosted payment fields (Stripe Elements / similar) keep card data out of your DOM entirely — that, plus this CSP, is the structural fix.</p></div>
+    <div class="panel"><h2 style="margin-top:0">Incident-response checklist</h2><ol class="check" id="checkList"></ol></div>
+  </section>
+
+  <!-- SANDBOX -->
+  <section id="tab-sandbox" hidden>
+    <div class="panel">
+      <h2 style="margin-top:0">Isolated sandbox — synthetic data only</h2>
+      <p class="mut">Runs in <b>your browser</b> inside a locked iframe: CSP <code>connect-src 'none'</code> blocks all network, fetch/XHR/beacon/WebSocket are stubbed and logged, and the only “card” is the test value 4111 1111 1111 1111. Nothing reaches the server or the internet.</p>
+      <div class="row"><button id="runSandbox">▶ Run current code in sandbox</button><span class="mut">Uses the code from the Scanner tab.</span></div>
+      <div style="height:12px"></div>
+      <iframe id="sbFrame" src="/sandbox-runner" sandbox="allow-scripts" title="sandbox runner"></iframe>
+    </div>
+  </section>
+
+  <p class="mut" style="text-align:center;font-size:12px">SkimAudit v1.0 · Static analysis has limits: it proves code paths exist, not that a live transmission already happened. Pair with CSP, SRI, and file-integrity monitoring. · Retention: scans purged after 30 days · No real payment data is ever collected by this tool.</p>
+</main>
+
+<script>
+const $=s=>document.querySelector(s);
+let lastScan=null;
+function esc(t){return String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function syncLines(){const n=$('#code').value.split('\n').length;$('#ln').textContent=Array.from({length:n},(_,i)=>i+1).join('\n')}
+$('#code').addEventListener('input',syncLines);
+$('#code').addEventListener('scroll',e=>{$('#ln').scrollTop=e.target.scrollTop});
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));t.classList.add('on');['scan','history','remed','sandbox'].forEach(k=>$('#tab-'+k).hidden=k!==t.dataset.tab);if(t.dataset.tab==='history')loadHistory();});
+
+async function stats(){const r=await fetch('/api/stats');const d=await r.json();$('#stTotal').textContent=d.total_scans;$('#stCrit').textContent=d.findings.critical;$('#stHigh').textContent=d.findings.high;$('#stMed').textContent=d.findings.medium;$('#stLow').textContent=d.findings.low;}
+async function me(){const r=await fetch('/api/me');const d=await r.json();$('#me').textContent=d.owner?'Owner: logged in':'Session: anonymous (your scans only)';$('#loginBtn').textContent=d.owner?'Log out':'Owner login';}
+$('#loginBtn').onclick=async()=>{const m=await (await fetch('/api/me')).json();if(m.owner){await fetch('/api/logout',{method:'POST'});me();stats();return;}const p=prompt('Owner password:');if(!p)return;const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:p})});if(r.ok){me();stats();loadHistory();}else alert('Wrong password.');};
+
+$('#loadSkim').onclick=async()=>{const d=await (await fetch('/api/samples/suspicious-debugger.js')).json();$('#code').value=d.code;$('#fname').value=d.filename;syncLines();};
+$('#loadSafe').onclick=async()=>{const d=await (await fetch('/api/samples/safe-script.js')).json();$('#code').value=d.code;$('#fname').value=d.filename;syncLines();};
+$('#fileUp').onchange=async e=>{const f=e.target.files[0];if(!f)return;const fd=new FormData();fd.append('file',f);$('#scanMsg').textContent='Uploading & scanning '+f.name+'…';const r=await fetch('/api/scan/upload',{method:'POST',body:fd});const d=await r.json();if(!r.ok){$('#scanMsg').textContent='Error: '+(d.detail||'upload failed');return;}$('#code').value='';$('#fname').value=d.filename;renderResults(d);$('#scanMsg').textContent='File scanned.';};
+
+$('#scanBtn').onclick=async()=>{const code=$('#code').value;if(!code.trim()){$('#scanMsg').textContent='Paste some JavaScript first (or load a sample).';return;}$('#scanMsg').textContent='Analyzing…';const r=await fetch('/api/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code,filename:$('#fname').value||'pasted-code.js'})});const d=await r.json();if(!r.ok){$('#scanMsg').textContent='Error: '+(d.detail||'scan failed');return;}renderResults(d);$('#scanMsg').textContent='Scan complete.';};
+
+function renderResults(d){lastScan=d;stats();
+  const c=d.counts;
+  let h=`<div class="panel"><div class="row" style="justify-content:space-between"><div><h2 style="margin:0">${esc(d.verdict)}</h2><div class="mut">${esc(d.filename)} · SHA-256 ${esc(d.sha256.slice(0,20))}… · ${d.lines} lines · Scan #${d.scan_id}</div></div><div style="min-width:220px;flex:1;max-width:340px"><div class="mut">Risk score ${d.risk_score}/100</div><div class="meter"><i style="width:${d.risk_score}%"></i></div></div></div>
+  <div class="row" style="margin-top:10px"><span class="badge critical">Critical ${c.critical}</span><span class="badge high">High ${c.high}</span><span class="badge medium">Medium ${c.medium}</span><span class="badge low">Low ${c.low}</span>
+  <span class="mut">Doc-wide monitoring: ${d.summary.has_document_wide_monitoring?'YES':'no'} · Payment field access: ${d.summary.has_payment_field_access?'YES':'no'} · Confirmed exfil path: ${d.summary.has_confirmed_exfil_path?'YES':'no'} · Commented exfil: ${d.summary.has_commented_exfil?'YES':'no'}</span></div>
+  <div class="row" style="margin-top:12px"><a href="/api/scan/${d.scan_id}/report.json"><button class="ghost">⬇ JSON report</button></a><a href="/api/scan/${d.scan_id}/report.pdf"><button class="ghost">⬇ PDF report</button></a></div></div>`;
+  if(!d.findings.length)h+=`<div class="panel empty">✅ No findings. This script shows no skimming, monitoring, or exfiltration patterns.</div>`;
+  d.findings.forEach(f=>{h+=`<div class="finding ${f.severity}"><div class="row"><span class="badge ${f.severity}">${f.severity}</span><b>${esc(f.title)}</b></div>
+    <div class="mut" style="margin-top:4px">${esc(f.category)} · Confidence: <b>${esc(f.confidence)}</b> · Line ${f.line} · Rule ${esc(f.rule_id)}</div>
+    <code class="snip">${esc(f.snippet||'')}</code><p>${esc(f.explanation)}</p><p><b>Fix:</b> ${esc(f.remediation)}</p>
+    <div class="row"><label class="mut">Status</label><select data-fid="${f.id}" class="fstatus"><option ${f.status==='open'?'selected':''}>open</option><option ${f.status==='investigating'?'selected':''}>investigating</option><option ${f.status==='resolved'?'selected':''}>resolved</option><option ${f.status==='false_positive'?'selected':''}>false_positive</option></select></div></div>`;});
+  // source viewer
+  const srcLines=($('#code').value||'').split('\n');const hl=new Set(d.findings.map(f=>f.line));
+  h+=`<div class="panel"><h3 style="margin-top:0">Source viewer — flagged lines highlighted</h3><div class="src">`+srcLines.map((l,i)=>`<div class="${hl.has(i+1)?'hl':''}"><span class="no">${i+1}</span>${esc(l)||' '}</div>`).join('')+`</div></div>`;
+  $('#results').innerHTML=h;
+  fillRemediation(d); bindStatus(d.scan_id);
+}
+function bindStatus(scanId){document.querySelectorAll('.fstatus').forEach(s=>s.onchange=async()=>{await fetch(`/api/scan/${scanId}/finding/${s.dataset.fid}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:s.value})});});}
+function fillRemediation(d){const rp=d.remediation_pack||{};$('#safeCode').textContent=rp.safe_replacement||'—';$('#cspBox').textContent=rp.csp||'—';$('#checkList').innerHTML=(rp.incident_checklist||[]).map(i=>`<li>${esc(i)}</li>`).join('');}
+
+async function loadHistory(){const q=encodeURIComponent($('#q').value||'');const sev=$('#sevFilter').value;const r=await fetch(`/api/scans?q=${q}&severity=${sev}`);const rows=await r.json();
+  if(!rows.length){$('#histWrap').innerHTML='<div class="empty">No scans yet. Run your first scan in the Scanner tab.</div>';return;}
+  $('#histWrap').innerHTML='<table><tr><th>#</th><th>File</th><th>Verdict</th><th>Risk</th><th>C/H/M/L</th><th>Date (UTC)</th><th></th></tr>'+rows.map(x=>`<tr><td>${x.id}</td><td>${esc(x.filename)}</td><td>${esc(x.verdict)}</td><td>${x.risk_score}</td><td>${x.counts.critical}/${x.counts.high}/${x.counts.medium}/${x.counts.low}</td><td class="mut">${esc(x.created_at.slice(0,16).replace('T',' '))}</td><td><button class="ghost" onclick="viewScan(${x.id})">View</button></td></tr>`).join('')+'</table>';}
+window.viewScan=async id=>{const d=await (await fetch('/api/scan/'+id)).json();$('#code').value=d.source||'';syncLines();document.querySelector('[data-tab="scan"]').click();renderResults(d);window.scrollTo({top:0,behavior:'smooth'});};
+$('#refreshHist').onclick=loadHistory;$('#q').oninput=loadHistory;$('#sevFilter').onchange=loadHistory;
+
+$('#runSandbox').onclick=()=>{const code=$('#code').value;if(!code.trim()){alert('Paste code in the Scanner tab first.');return;}$('#sbFrame').contentWindow.postMessage({type:'run',code},'*');};
+stats();me();syncLines();
+</script></body></html>

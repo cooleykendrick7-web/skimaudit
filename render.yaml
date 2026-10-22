@@ -1,0 +1,24 @@
+# SkimAudit — Render Blueprint
+# In Render: New → Blueprint → connect the repo containing this file.
+# Starter plan (~$7/mo) includes the persistent disk at /data so the
+# scan database survives restarts and redeploys.
+services:
+  - type: web
+    name: skimaudit
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    disk:
+      name: skimaudit-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: SKIMAUDIT_OWNER_PASSWORD
+        sync: false
+      - key: SKIMAUDIT_SESSION_SECRET
+        generateValue: true
+      - key: SKIMAUDIT_DB
+        value: /data/skimaudit.db
+      - key: SKIMAUDIT_RETENTION_DAYS
+        value: "30"
