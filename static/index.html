@@ -60,6 +60,16 @@ a{color:var(--acc)}
 
   <!-- SCANNER -->
   <section id="tab-scan">
+    <div class="panel" style="border-color:var(--acc)">
+      <h2 style="margin:0 0 6px">🤖 Self-operating mode — just give it a website</h2>
+      <p class="mut" style="margin:0 0 10px">Type any website address. SkimAudit goes there itself, downloads the page, grabs <b>every script on it</b> (including third-party ones), scans each one, and hands you one combined report. No copy-pasting. Scripts are only read, never run.</p>
+      <div class="row">
+        <input id="siteUrl" placeholder="e.g. https://yourstore.com/checkout" style="flex:1;min-width:240px" aria-label="Website URL">
+        <button id="auditBtn">🤖 Audit this website</button>
+      </div>
+      <div id="urlMsg" class="mut" style="margin-top:8px"></div>
+      <div id="urlResults" style="margin-top:10px"></div>
+    </div>
     <div class="panel">
       <div class="row">
         <input id="fname" value="pasted-code.js" style="min-width:220px" aria-label="Filename">
@@ -132,7 +142,7 @@ function renderResults(d){lastScan=d;stats();
   let h=`<div class="panel"><div class="row" style="justify-content:space-between"><div><h2 style="margin:0">${esc(d.verdict)}</h2><div class="mut">${esc(d.filename)} · SHA-256 ${esc(d.sha256.slice(0,20))}… · ${d.lines} lines · Scan #${d.scan_id}</div></div><div style="min-width:220px;flex:1;max-width:340px"><div class="mut">Risk score ${d.risk_score}/100</div><div class="meter"><i style="width:${d.risk_score}%"></i></div></div></div>
   <div class="row" style="margin-top:10px"><span class="badge critical">Critical ${c.critical}</span><span class="badge high">High ${c.high}</span><span class="badge medium">Medium ${c.medium}</span><span class="badge low">Low ${c.low}</span>
   <span class="mut">Doc-wide monitoring: ${d.summary.has_document_wide_monitoring?'YES':'no'} · Payment field access: ${d.summary.has_payment_field_access?'YES':'no'} · Confirmed exfil path: ${d.summary.has_confirmed_exfil_path?'YES':'no'} · Commented exfil: ${d.summary.has_commented_exfil?'YES':'no'}</span></div>
-  <div class="row" style="margin-top:12px"><a href="/api/scan/${d.scan_id}/report.json"><button class="ghost">⬇ JSON report</button></a><a href="/api/scan/${d.scan_id}/report.pdf"><button class="ghost">⬇ PDF report</button></a></div></div>`;
+  <div class="row" style="margin-top:12px"><a href="/api/scan/${d.scan_id}/report.json"><button class="ghost">⬇ JSON report</button></a><a href="/api/scan/${d.scan_id}/report.pdf"><button class="ghost">⬇ PDF report</button></a><button class="ghost" id="copyReport">📋 Copy full report</button><span class="mut" id="copyMsg"></span></div></div>`;
   if(!d.findings.length)h+=`<div class="panel empty">✅ No findings. This script shows no skimming, monitoring, or exfiltration patterns.</div>`;
   d.findings.forEach(f=>{h+=`<div class="finding ${f.severity}"><div class="row"><span class="badge ${f.severity}">${f.severity}</span><b>${esc(f.title)}</b></div>
     <div class="mut" style="margin-top:4px">${esc(f.category)} · Confidence: <b>${esc(f.confidence)}</b> · Line ${f.line} · Rule ${esc(f.rule_id)}</div>
@@ -144,7 +154,20 @@ function renderResults(d){lastScan=d;stats();
   $('#results').innerHTML=h;
   fillRemediation(d); bindStatus(d.scan_id);
 }
-function bindStatus(scanId){document.querySelectorAll('.fstatus').forEach(s=>s.onchange=async()=>{await fetch(`/api/scan/${scanId}/finding/${s.dataset.fid}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:s.value})});});}
+function bindStatus(scanId){document.querySelectorAll('.fstatus').forEach(s=>s.onchange=async()=>{await fetch(`/api/scan/${scanId}/finding/${s.dataset.fid}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:s.value})});});
+  const cb=$('#copyReport'); if(cb) cb.onclick=async()=>{const d=lastScan; if(!d)return;
+    let t=`SkimAudit Report — ${d.filename}\nVerdict: ${d.verdict} (risk ${d.risk_score}/100)\nSHA-256: ${d.sha256}\nFindings: ${d.counts.critical} critical, ${d.counts.high} high, ${d.counts.medium} medium, ${d.counts.low} low\n`;
+    d.findings.forEach(f=>{t+=`\n[${f.severity.toUpperCase()}] Line ${f.line} — ${f.title} (${f.confidence})\nCode: ${f.snippet}\nWhy: ${f.explanation}\nFix: ${f.remediation}\n`;});
+    if(d.remediation_pack){t+=`\nRecommended CSP:\n${d.remediation_pack.csp}\n\nSafe replacement:\n${d.remediation_pack.safe_replacement}\n`;}
+    try{await navigator.clipboard.writeText(t);$('#copyMsg').textContent='Copied — paste it anywhere.';}catch(e){$('#copyMsg').textContent='Copy blocked by the browser — use the JSON/PDF download instead.';}};}
+
+$('#auditBtn').onclick=async()=>{const url=$('#siteUrl').value.trim();if(!url){$('#urlMsg').textContent='Type a website address first.';return;}
+  $('#urlMsg').textContent='🤖 Going to the site, grabbing every script, scanning each one… (can take up to ~30 seconds)';$('#urlResults').innerHTML='';
+  const r=await fetch('/api/scan-url',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});const d=await r.json();
+  if(!r.ok){$('#urlMsg').textContent='Could not audit: '+(d.detail||'failed');return;}
+  $('#urlMsg').textContent=`Done — ${d.scripts_found} script(s) pulled from ${d.url} and scanned. Worst risk on the page: ${d.worst_risk}/100. Totals: ${d.totals.critical} critical · ${d.totals.high} high · ${d.totals.medium} medium · ${d.totals.low} low. Tap a script to see its full report.`;
+  $('#urlResults').innerHTML='<table><tr><th>Script SkimAudit pulled</th><th>Verdict</th><th>Risk</th><th>C/H/M/L</th><th></th></tr>'+d.scripts.map(s=>s.error?`<tr><td style="word-break:break-all">${esc(s.filename)}</td><td colspan="3" class="mut">${esc(s.error)}</td><td></td></tr>`:`<tr><td style="word-break:break-all">${esc(s.filename)}</td><td>${esc(s.verdict)}</td><td>${s.risk_score}</td><td>${s.counts.critical}/${s.counts.high}/${s.counts.medium}/${s.counts.low}</td><td><button class="ghost" onclick="viewScan(${s.scan_id})">Full report</button></td></tr>`).join('')+'</table>';
+  stats();};
 function fillRemediation(d){const rp=d.remediation_pack||{};$('#safeCode').textContent=rp.safe_replacement||'—';$('#cspBox').textContent=rp.csp||'—';$('#checkList').innerHTML=(rp.incident_checklist||[]).map(i=>`<li>${esc(i)}</li>`).join('');}
 
 async function loadHistory(){const q=encodeURIComponent($('#q').value||'');const sev=$('#sevFilter').value;const r=await fetch(`/api/scans?q=${q}&severity=${sev}`);const rows=await r.json();
